@@ -22,11 +22,10 @@ RUN apk add --no-cache \
     curl \
     unzip \
     && pip3 install --break-system-packages yt-dlp \
-    && curl -fsSL https://deno.land/install.sh | sh \
-    && mv /root/.deno/bin/deno /usr/local/bin/deno \
+    && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
     && chmod +x /usr/local/bin/deno \
     && /usr/local/bin/deno --version \
-    && rm -rf /var/cache/apk/* /root/.deno
+    && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
