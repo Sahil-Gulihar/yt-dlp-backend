@@ -1,10 +1,9 @@
 import { spawn } from "child_process"
-import { existsSync, mkdirSync, copyFileSync, chmodSync } from "fs"
+import { existsSync, mkdirSync } from "fs"
 import path from "path"
 import type { DownloadRequest, VideoInfo } from "../types/index.js"
 
 const DOWNLOADS_DIR = path.join(process.cwd(), "downloads")
-const TEMP_DIR = path.join(process.cwd(), "tmp")
 
 function ensureDownloadsDir() {
   if (!existsSync(DOWNLOADS_DIR)) {
@@ -12,54 +11,16 @@ function ensureDownloadsDir() {
   }
 }
 
-function ensureTempDir() {
-  if (!existsSync(TEMP_DIR)) {
-    mkdirSync(TEMP_DIR, { recursive: true })
-  }
-}
-
-function getWritableCookiesFile(): string | null {
-  const cookiesFile = process.env.YT_DLP_COOKIES_FILE
-  if (!cookiesFile || !existsSync(cookiesFile)) {
-    return null
-  }
-
-  // Copy cookies to a writable temp location to avoid permission errors
-  ensureTempDir()
-  const tempCookiesFile = path.join(TEMP_DIR, "cookies.txt")
-  try {
-    copyFileSync(cookiesFile, tempCookiesFile)
-    // Make it writable
-    chmodSync(tempCookiesFile, 0o644)
-    return tempCookiesFile
-  } catch (error) {
-    console.warn(`Failed to copy cookies file to temp location: ${error}`)
-    // Fallback to original file (might fail on write, but at least we can read)
-    return cookiesFile
-  }
-}
-
 function sanitizeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9-_]/g, "_").substring(0, 100)
 }
 
-function addCookieArgs(args: string[], hasCookies: { value: boolean }): void {
-  // Priority: cookies file > browser cookies
-  const writableCookiesFile = getWritableCookiesFile()
-  if (writableCookiesFile) {
-    args.push("--cookies", writableCookiesFile)
-    hasCookies.value = true
-    return
-  }
-
-  // Try to use cookies from browser if available (helps bypass bot detection)
-  const cookiesBrowser = process.env.YT_DLP_COOKIES_BROWSER
-  if (cookiesBrowser) {
-    const supportedBrowsers = ["chrome", "firefox", "edge", "opera", "safari", "brave"]
-    if (supportedBrowsers.includes(cookiesBrowser.toLowerCase())) {
-      args.push("--cookies-from-browser", cookiesBrowser.toLowerCase())
-      hasCookies.value = true
-    }
+function addTokenArgs(args: string[], hasToken: { value: boolean }): void {
+  const poToken = process.env.YT_DLP_PO_TOKEN
+  if (poToken) {
+    // Add PO token via extractor args (yt-dlp format: youtube:po_token=web+TOKEN)
+    args.push("--extractor-args", `youtube:po_token=web+${poToken}`)
+    hasToken.value = true
   }
 }
 
@@ -72,13 +33,13 @@ function buildYtDlpArgs(request: DownloadRequest, outputPath: string): string[] 
     "--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   ]
 
-  // Add cookie support for bypassing bot detection
-  const hasCookies = { value: false }
-  addCookieArgs(args, hasCookies)
+  // Add PO token support for bypassing bot detection
+  const hasToken = { value: false }
+  addTokenArgs(args, hasToken)
 
   // Use multiple player clients as fallback
-  // Only use web client when cookies are present (ios/android don't support cookies)
-  if (hasCookies.value) {
+  // Only use web client when token is present (ios/android don't support tokens)
+  if (hasToken.value) {
     args.push("--extractor-args", "youtube:player_client=web")
   } else {
     args.push("--extractor-args", "youtube:player_client=web,ios,android")
@@ -125,13 +86,13 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
       "--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     ]
 
-    // Add cookie support for bypassing bot detection
-    const hasCookies = { value: false }
-    addCookieArgs(args, hasCookies)
+    // Add PO token support for bypassing bot detection
+    const hasToken = { value: false }
+    addTokenArgs(args, hasToken)
 
     // Use multiple player clients as fallback
-    // Only use web client when cookies are present (ios/android don't support cookies)
-    if (hasCookies.value) {
+    // Only use web client when token is present (ios/android don't support tokens)
+    if (hasToken.value) {
       args.push("--extractor-args", "youtube:player_client=web")
     } else {
       args.push("--extractor-args", "youtube:player_client=web,ios,android")
@@ -152,17 +113,13 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
 
     process.on("close", (code) => {
       if (code !== 0) {
-        // Filter out permission errors related to cookies (non-critical)
-        const filteredStderr = stderr
-          .split("\n")
-          .filter((line) => !line.includes("PermissionError") && !line.includes("Permission denied"))
-          .join("\n")
+        const filteredStderr = stderr.trim()
         
         // Check for specific YouTube blocking errors
         if (filteredStderr.includes("Only images are available") || filteredStderr.includes("Requested format is not available")) {
           const errorMsg = "YouTube is blocking access to this video. This may be due to:\n" +
-            "- Expired or invalid cookies (try updating your cookies.txt file)\n" +
-            "- Bot detection (YouTube may require fresh cookies)\n" +
+            "- Invalid or expired PO token (check YT_DLP_PO_TOKEN environment variable)\n" +
+            "- Bot detection (YouTube may require a valid token)\n" +
             "- Age-restricted or region-locked content\n" +
             "- Video may be unavailable\n\n" +
             "Original error: " + filteredStderr
@@ -171,7 +128,7 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
         }
         
         // If there's still an error after filtering, reject
-        if (filteredStderr.trim() && !stdout.trim()) {
+        if (filteredStderr && !stdout.trim()) {
           reject(new Error(`Failed to get video info: ${filteredStderr || stderr}`))
           return
         }
@@ -230,17 +187,13 @@ export async function downloadVideo(request: DownloadRequest): Promise<{ filenam
 
     process.on("close", (code) => {
       if (code !== 0) {
-        // Filter out permission errors related to cookies (non-critical)
-        const filteredStderr = stderr
-          .split("\n")
-          .filter((line) => !line.includes("PermissionError") && !line.includes("Permission denied"))
-          .join("\n")
+        const filteredStderr = stderr.trim()
         
         // Check for specific YouTube blocking errors
         if (filteredStderr.includes("Only images are available") || filteredStderr.includes("Requested format is not available")) {
           const errorMsg = "YouTube is blocking access to this video. This may be due to:\n" +
-            "- Expired or invalid cookies (try updating your cookies.txt file)\n" +
-            "- Bot detection (YouTube may require fresh cookies)\n" +
+            "- Invalid or expired PO token (check YT_DLP_PO_TOKEN environment variable)\n" +
+            "- Bot detection (YouTube may require a valid token)\n" +
             "- Age-restricted or region-locked content\n" +
             "- Video may be unavailable\n\n" +
             "Original error: " + filteredStderr

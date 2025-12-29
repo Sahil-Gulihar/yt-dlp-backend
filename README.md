@@ -72,46 +72,45 @@ cmd = "node dist/index.js"
 | `PORT` | `3000` | Server port |
 | `NODE_ENV` | `development` | Environment mode |
 | `CORS_ORIGIN` | `*` | Allowed CORS origin |
-| `YT_DLP_COOKIES_FILE` | - | Path to cookies file (Netscape format) |
-| `YT_DLP_COOKIES_BROWSER` | - | Browser to extract cookies from: `chrome`, `firefox`, `edge`, `opera`, `safari`, `brave` |
+| `YT_DLP_PO_TOKEN` | - | PO token for bypassing YouTube bot detection |
 
 ### Bypassing YouTube Bot Detection
 
-YouTube may block requests if it detects automated access. To bypass this, you can provide cookies:
+YouTube may block requests if it detects automated access. To bypass this, you can provide a PO (Proof of Origin) token.
 
-#### Option 1: Export Cookies File (Recommended for Docker)
+#### How to Get a PO Token
 
-1. Install a browser extension like [Get cookies.txt LOCALLY](https://chrome.google.com/webstore/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) or use yt-dlp directly:
-   ```bash
-   yt-dlp --cookies-from-browser chrome --cookies cookies.txt "https://www.youtube.com"
-   ```
+1. Open YouTube in your browser and press `F12` to open Developer Tools
+2. Go to the **Network** tab and filter by `v1/player`
+3. Play any video and click on the `player` request
+4. In the request payload, find `serviceIntegrityDimensions.poToken` and copy its value
 
-2. Save the cookies file and mount it in Docker:
-   ```bash
-   docker run -p 3000:3000 \
-     -e YT_DLP_COOKIES_FILE=/app/cookies.txt \
-     -v $(pwd)/cookies.txt:/app/cookies.txt \
-     yt-dl-backend
-   ```
+See [TOKEN.md](./TOKEN.md) for detailed instructions.
 
-   Or in `docker-compose.yml`:
-   ```yaml
-   volumes:
-     - downloads:/app/downloads
-     - ./cookies.txt:/app/cookies.txt
-   environment:
-     - YT_DLP_COOKIES_FILE=/app/cookies.txt
-   ```
+#### Setting the PO Token
 
-#### Option 2: Use Browser Cookies (Local Development Only)
+Set the `YT_DLP_PO_TOKEN` environment variable with your token:
 
-For local development, you can extract cookies directly from your browser:
+**Local Development:**
 ```bash
-export YT_DLP_COOKIES_BROWSER=chrome
+export YT_DLP_PO_TOKEN=your_token_here
 npm run dev
 ```
 
-**Note:** Browser cookie extraction requires access to your browser's cookie database, which typically only works on your local machine, not in Docker containers.
+**Docker:**
+```bash
+docker run -p 3000:3000 \
+  -e YT_DLP_PO_TOKEN=your_token_here \
+  yt-dl-backend
+```
+
+**Docker Compose:**
+```yaml
+environment:
+  - YT_DLP_PO_TOKEN=your_token_here
+```
+
+The token will be automatically passed to yt-dlp via extractor arguments.
 
 ### Health Check
 
