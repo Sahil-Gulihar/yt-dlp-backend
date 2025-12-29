@@ -1,3 +1,6 @@
+# Deno stage - get deno binary
+FROM denoland/deno:alpine AS deno
+
 # Build stage
 FROM node:20-alpine AS builder
 
@@ -14,19 +17,17 @@ RUN npm run build
 # Production stage
 FROM node:20-alpine AS production
 
-# Install yt-dlp, ffmpeg, python, and deno (JavaScript runtime for yt-dlp)
+# Copy deno from official image
+COPY --from=deno /usr/local/bin/deno /usr/local/bin/deno
+
+# Install yt-dlp, ffmpeg, and python
 RUN apk add --no-cache \
     ffmpeg \
     python3 \
     py3-pip \
-    curl \
-    unzip \
     && pip3 install --break-system-packages yt-dlp \
-    && curl -fsSL https://deno.land/install.sh | sh \
-    && ls -la /root/.deno/bin/ \
-    && install -m 755 /root/.deno/bin/deno /usr/local/bin/deno \
-    && /usr/local/bin/deno --version \
-    && rm -rf /var/cache/apk/* /root/.deno
+    && deno --version \
+    && rm -rf /var/cache/apk/*
 
 WORKDIR /app
 
