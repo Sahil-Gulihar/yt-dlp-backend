@@ -9,7 +9,7 @@ services:
       - NODE_ENV=production
       - PORT=3000
       # Uncomment and set PO token to bypass YouTube bot detection
-      # - YT_DLP_PO_TOKEN=your_token_here
+      - YT_DLP_PO_TOKEN=MlMmXILMlmpLgSZgDsq6Pgi8iUlM0ujCBrSPy6w0D8yl8Vp-Kxqx9Q68VIBuxVKlL1320Pzf8lHUSNzpXG76swekVbFyvAoLBmnkIL5uQ49WdukD5A==
     volumes:
       - downloads:/app/downloads
     healthcheck:
