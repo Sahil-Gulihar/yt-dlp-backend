@@ -19,11 +19,7 @@ function buildYtDlpArgs(request: DownloadRequest, outputPath: string): string[] 
   const args: string[] = [
     "--js-runtimes", "deno",
     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "--extractor-args", "youtube:player_client=android",
-    "--socket-timeout", "30",
-    "--retries", "3",
-    "--fragment-retries", "3",
-    "--no-warnings"
+    "--extractor-args", "youtube:player_client=web"
   ]
 
   if (request.format === "mp3") {
@@ -57,19 +53,13 @@ function buildYtDlpArgs(request: DownloadRequest, outputPath: string): string[] 
 
 export async function getVideoInfo(url: string): Promise<VideoInfo> {
   return new Promise((resolve, reject) => {
-    // Normalize URL - remove query parameters that might cause issues
-    const normalizedUrl = url.split('?')[0]
-    
     const args = [
       "-j",
       "--no-playlist",
       "--js-runtimes", "deno",
       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "--extractor-args", "youtube:player_client=android",
-      "--socket-timeout", "30",
-      "--retries", "3",
-      "--no-warnings",
-      normalizedUrl
+      "--extractor-args", "youtube:player_client=web",
+      url
     ]
     const process = spawn("yt-dlp", args)
 
@@ -108,18 +98,14 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
 export async function downloadVideo(request: DownloadRequest): Promise<{ filename: string; filepath: string }> {
   ensureDownloadsDir()
 
-  // Normalize URL - remove query parameters that might cause issues
-  const normalizedUrl = request.url.split('?')[0]
-  const normalizedRequest = { ...request, url: normalizedUrl }
-
   // Get video info first to get the title
-  const info = await getVideoInfo(normalizedUrl)
+  const info = await getVideoInfo(request.url)
   const sanitizedTitle = sanitizeFilename(info.title)
   const extension = request.format === "mp3" ? "mp3" : "mp4"
   const filename = `${sanitizedTitle}_${Date.now()}.${extension}`
   const outputPath = path.join(DOWNLOADS_DIR, filename)
 
-  const args = buildYtDlpArgs(normalizedRequest, outputPath)
+  const args = buildYtDlpArgs(request, outputPath)
 
   return new Promise((resolve, reject) => {
     console.log(`Starting download: yt-dlp ${args.join(" ")}`)
