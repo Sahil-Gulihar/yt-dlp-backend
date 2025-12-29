@@ -42,7 +42,8 @@ COPY --from=builder /app/dist ./dist
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV YT_DLP_PO_TOKEN=MlMmXILMlmpLgSZgDsq6Pgi8iUlM0ujCBrSPy6w0D8yl8Vp-Kxqx9Q68VIBuxVKlL1320Pzf8lHUSNzpXG76swekVbFyvAoLBmnkIL5uQ49WdukD5A==
+# YT_DLP_PO_TOKEN should be set at runtime via docker run -e or docker-compose.yml
+# Do NOT hardcode tokens in Dockerfile for security reasons
 
 # Expose port
 EXPOSE 3000

@@ -17,15 +17,13 @@ function sanitizeFilename(filename: string): string {
 
 function addTokenArgs(args: string[], hasToken: { value: boolean }): void {
   const poToken = process.env.YT_DLP_PO_TOKEN
-  if (poToken && poToken.trim()) {
-    // Combine PO token with player_client in a single extractor-args call
+  if (poToken) {
+    // Add PO token via extractor args
     // Format: youtube:player_client=web;po_token=web+TOKEN
-    args.push("--extractor-args", `youtube:player_client=web;po_token=web+${poToken.trim()}`)
+    // Combine player_client and po_token in a single extractor-args
+    args.push("--extractor-args", `youtube:player_client=web;po_token=web+${poToken}`)
     hasToken.value = true
     console.log("PO token detected and will be used for authentication")
-  } else {
-    // Fallback to multiple player clients when no token is available
-    args.push("--extractor-args", "youtube:player_client=web,ios,android")
   }
 }
 
@@ -41,6 +39,12 @@ function buildYtDlpArgs(request: DownloadRequest, outputPath: string): string[] 
   // Add PO token support for bypassing bot detection
   const hasToken = { value: false }
   addTokenArgs(args, hasToken)
+
+  // Use multiple player clients as fallback only if no token
+  // When token is present, it's already combined with player_client=web in addTokenArgs
+  if (!hasToken.value) {
+    args.push("--extractor-args", "youtube:player_client=web,ios,android")
+  }
 
   if (request.format === "mp3") {
     args.push("-x", "--audio-format", "mp3", "--audio-quality", "0")
@@ -86,7 +90,16 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
     // Add PO token support for bypassing bot detection
     const hasToken = { value: false }
     addTokenArgs(args, hasToken)
+
+    // Use multiple player clients as fallback only if no token
+    // When token is present, it's already combined with player_client=web in addTokenArgs
+    if (!hasToken.value) {
+      args.push("--extractor-args", "youtube:player_client=web,ios,android")
+    }
     args.push(url)
+    
+    // Capture token status before spawning process
+    const poToken = process.env.YT_DLP_PO_TOKEN
     const ytDlpProcess = spawn("yt-dlp", args)
 
     let stdout = ""
@@ -104,23 +117,19 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
       if (code !== 0) {
         const filteredStderr = stderr.trim()
         
-        // Check for specific YouTube blocking errors
+        // Check for bot detection errors (most common)
         if (filteredStderr.includes("Sign in to confirm you're not a bot") || 
             filteredStderr.includes("Only images are available") || 
             filteredStderr.includes("Requested format is not available")) {
-          const poToken = process.env.YT_DLP_PO_TOKEN
-          const tokenStatus = poToken ? "PO token is set" : "PO token is NOT set (YT_DLP_PO_TOKEN)"
-          const errorMsg = "YouTube is blocking access to this video. This may be due to:\n" +
-            `- ${tokenStatus}\n` +
-            "- Invalid or expired PO token (extract a fresh one from your browser)\n" +
-            "- Bot detection (YouTube may require a valid PO token)\n" +
-            "- Age-restricted or region-locked content\n" +
-            "- Video may be unavailable\n\n" +
-            "To get a PO token:\n" +
-            "1. Open YouTube in browser, press F12 → Network tab\n" +
-            "2. Filter by 'v1/player', play a video\n" +
-            "3. Find 'serviceIntegrityDimensions.poToken' in the request payload\n" +
-            "4. Set it as: export YT_DLP_PO_TOKEN=your_token\n\n" +
+          const tokenStatus = poToken ? "PO token is set" : "No PO token set"
+          const errorMsg = "YouTube is blocking access to this video (bot detection).\n" +
+            `Current status: ${tokenStatus}\n` +
+            "Possible solutions:\n" +
+            "- Extract a fresh PO token from your browser (see TOKEN.md)\n" +
+            "- PO tokens expire quickly - try extracting a new one\n" +
+            "- Ensure the token was extracted from the same session\n" +
+            "- Server IP might be flagged - try from a different IP\n" +
+            "- Age-restricted or region-locked content\n\n" +
             "Original error: " + filteredStderr
           reject(new Error(`Failed to get video info: ${errorMsg}`))
           return
@@ -169,8 +178,22 @@ export async function downloadVideo(request: DownloadRequest): Promise<{ filenam
   const args = buildYtDlpArgs(request, outputPath)
 
   return new Promise((resolve, reject) => {
-    console.log(`Starting download: yt-dlp ${args.join(" ")}`)
+    // Log args but mask sensitive token
+    const maskedArgs = args.map(arg => {
+      if (arg.includes("po_token=")) {
+        const parts = arg.split("=")
+        if (parts.length > 1) {
+          const token = parts[1].split("+")[1] || ""
+          const masked = token.length > 8 ? token.substring(0, 4) + "..." + token.substring(token.length - 4) : "***"
+          return parts[0] + "=web+" + masked
+        }
+      }
+      return arg
+    })
+    console.log(`Starting download: yt-dlp ${maskedArgs.join(" ")}`)
 
+    // Capture token status before spawning process
+    const poToken = process.env.YT_DLP_PO_TOKEN
     const ytDlpProcess = spawn("yt-dlp", args)
 
     let stderr = ""
@@ -188,23 +211,19 @@ export async function downloadVideo(request: DownloadRequest): Promise<{ filenam
       if (code !== 0) {
         const filteredStderr = stderr.trim()
         
-        // Check for specific YouTube blocking errors
+        // Check for bot detection errors (most common)
         if (filteredStderr.includes("Sign in to confirm you're not a bot") || 
             filteredStderr.includes("Only images are available") || 
             filteredStderr.includes("Requested format is not available")) {
-          const poToken = process.env.YT_DLP_PO_TOKEN
-          const tokenStatus = poToken ? "PO token is set" : "PO token is NOT set (YT_DLP_PO_TOKEN)"
-          const errorMsg = "YouTube is blocking access to this video. This may be due to:\n" +
-            `- ${tokenStatus}\n` +
-            "- Invalid or expired PO token (extract a fresh one from your browser)\n" +
-            "- Bot detection (YouTube may require a valid PO token)\n" +
-            "- Age-restricted or region-locked content\n" +
-            "- Video may be unavailable\n\n" +
-            "To get a PO token:\n" +
-            "1. Open YouTube in browser, press F12 → Network tab\n" +
-            "2. Filter by 'v1/player', play a video\n" +
-            "3. Find 'serviceIntegrityDimensions.poToken' in the request payload\n" +
-            "4. Set it as: export YT_DLP_PO_TOKEN=your_token\n\n" +
+          const tokenStatus = poToken ? "PO token is set" : "No PO token set"
+          const errorMsg = "YouTube is blocking access to this video (bot detection).\n" +
+            `Current status: ${tokenStatus}\n` +
+            "Possible solutions:\n" +
+            "- Extract a fresh PO token from your browser (see TOKEN.md)\n" +
+            "- PO tokens expire quickly - try extracting a new one\n" +
+            "- Ensure the token was extracted from the same session\n" +
+            "- Server IP might be flagged - try from a different IP\n" +
+            "- Age-restricted or region-locked content\n\n" +
             "Original error: " + filteredStderr
           reject(new Error(`Download failed: ${errorMsg}`))
           return
