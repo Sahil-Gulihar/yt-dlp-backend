@@ -8,8 +8,12 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      # Uncomment and set path to cookies file to bypass YouTube bot detection
+      # - YT_DLP_COOKIES_FILE=/app/cookies.txt
     volumes:
       - downloads:/app/downloads
+      # Uncomment to mount cookies file
+      # - ./cookies.txt:/app/cookies.txt
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
       interval: 30s

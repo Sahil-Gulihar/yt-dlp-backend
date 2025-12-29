@@ -15,12 +15,38 @@ function sanitizeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9-_]/g, "_").substring(0, 100)
 }
 
+function addCookieArgs(args: string[]): void {
+  // Priority: cookies file > browser cookies
+  const cookiesFile = process.env.YT_DLP_COOKIES_FILE
+  if (cookiesFile && existsSync(cookiesFile)) {
+    args.push("--cookies", cookiesFile)
+    return
+  }
+
+  // Try to use cookies from browser if available (helps bypass bot detection)
+  const cookiesBrowser = process.env.YT_DLP_COOKIES_BROWSER
+  if (cookiesBrowser) {
+    const supportedBrowsers = ["chrome", "firefox", "edge", "opera", "safari", "brave"]
+    if (supportedBrowsers.includes(cookiesBrowser.toLowerCase())) {
+      args.push("--cookies-from-browser", cookiesBrowser.toLowerCase())
+    }
+  }
+}
+
 function buildYtDlpArgs(request: DownloadRequest, outputPath: string): string[] {
   const args: string[] = [
     "--js-runtimes", "deno",
     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "--extractor-args", "youtube:player_client=web"
+    "--referer", "https://www.youtube.com/",
+    "--add-header", "Accept-Language:en-US,en;q=0.9",
+    "--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   ]
+
+  // Add cookie support for bypassing bot detection
+  addCookieArgs(args)
+
+  // Use multiple player clients as fallback
+  args.push("--extractor-args", "youtube:player_client=web,ios,android")
 
   if (request.format === "mp3") {
     args.push("-x", "--audio-format", "mp3", "--audio-quality", "0")
@@ -58,9 +84,17 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
       "--no-playlist",
       "--js-runtimes", "deno",
       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "--extractor-args", "youtube:player_client=web",
-      url
+      "--referer", "https://www.youtube.com/",
+      "--add-header", "Accept-Language:en-US,en;q=0.9",
+      "--add-header", "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     ]
+
+    // Add cookie support for bypassing bot detection
+    addCookieArgs(args)
+
+    // Use multiple player clients as fallback
+    args.push("--extractor-args", "youtube:player_client=web,ios,android")
+    args.push(url)
     const process = spawn("yt-dlp", args)
 
     let stdout = ""
