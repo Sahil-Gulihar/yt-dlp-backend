@@ -25,7 +25,8 @@ RUN apk add --no-cache \
     && curl -fsSL https://deno.land/install.sh | sh \
     && mv /root/.deno/bin/deno /usr/local/bin/deno \
     && chmod +x /usr/local/bin/deno \
-    && rm -rf /var/cache/apk/* /root/.deno
+    && rm -rf /var/cache/apk/* /root/.deno \
+    && deno --version
 
 WORKDIR /app
 
