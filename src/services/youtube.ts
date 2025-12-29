@@ -16,7 +16,11 @@ function sanitizeFilename(filename: string): string {
 }
 
 function buildYtDlpArgs(request: DownloadRequest, outputPath: string): string[] {
-  const args: string[] = []
+  const args: string[] = [
+    "--js-runtimes", "deno",
+    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "--extractor-args", "youtube:player_client=web"
+  ]
 
   if (request.format === "mp3") {
     args.push("-x", "--audio-format", "mp3", "--audio-quality", "0")
@@ -49,7 +53,14 @@ function buildYtDlpArgs(request: DownloadRequest, outputPath: string): string[] 
 
 export async function getVideoInfo(url: string): Promise<VideoInfo> {
   return new Promise((resolve, reject) => {
-    const args = ["-j", "--no-playlist", url]
+    const args = [
+      "-j",
+      "--no-playlist",
+      "--js-runtimes", "deno",
+      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "--extractor-args", "youtube:player_client=web",
+      url
+    ]
     const process = spawn("yt-dlp", args)
 
     let stdout = ""

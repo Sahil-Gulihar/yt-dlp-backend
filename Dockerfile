@@ -14,13 +14,18 @@ RUN npm run build
 # Production stage
 FROM node:20-alpine AS production
 
-# Install yt-dlp, ffmpeg, and python (required by yt-dlp)
+# Install yt-dlp, ffmpeg, python, and deno (JavaScript runtime for yt-dlp)
 RUN apk add --no-cache \
     ffmpeg \
     python3 \
     py3-pip \
+    curl \
+    unzip \
     && pip3 install --break-system-packages yt-dlp \
-    && rm -rf /var/cache/apk/*
+    && curl -fsSL https://deno.land/install.sh | sh \
+    && mv /root/.deno/bin/deno /usr/local/bin/deno \
+    && chmod +x /usr/local/bin/deno \
+    && rm -rf /var/cache/apk/* /root/.deno
 
 WORKDIR /app
 
