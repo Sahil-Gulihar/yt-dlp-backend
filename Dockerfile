@@ -29,8 +29,8 @@ RUN apk add --no-cache \
 
 WORKDIR /app
 
-# Create downloads directory
-RUN mkdir -p /app/downloads
+# Create downloads and tmp directories
+RUN mkdir -p /app/downloads /app/tmp
 
 # Copy package files and install production dependencies only
 COPY package*.json ./
@@ -53,7 +53,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Run as non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nodejs -u 1001 && \
-    chown -R nodejs:nodejs /app
+    chown -R nodejs:nodejs /app && \
+    chmod -R 755 /app/tmp
 
 USER nodejs
 

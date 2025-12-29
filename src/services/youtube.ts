@@ -1,9 +1,10 @@
 import { spawn } from "child_process"
-import { existsSync, mkdirSync } from "fs"
+import { existsSync, mkdirSync, copyFileSync, chmodSync } from "fs"
 import path from "path"
 import type { DownloadRequest, VideoInfo } from "../types/index.js"
 
 const DOWNLOADS_DIR = path.join(process.cwd(), "downloads")
+const TEMP_DIR = path.join(process.cwd(), "tmp")
 
 function ensureDownloadsDir() {
   if (!existsSync(DOWNLOADS_DIR)) {
@@ -11,15 +12,43 @@ function ensureDownloadsDir() {
   }
 }
 
+function ensureTempDir() {
+  if (!existsSync(TEMP_DIR)) {
+    mkdirSync(TEMP_DIR, { recursive: true })
+  }
+}
+
+function getWritableCookiesFile(): string | null {
+  const cookiesFile = process.env.YT_DLP_COOKIES_FILE
+  if (!cookiesFile || !existsSync(cookiesFile)) {
+    return null
+  }
+
+  // Copy cookies to a writable temp location to avoid permission errors
+  ensureTempDir()
+  const tempCookiesFile = path.join(TEMP_DIR, "cookies.txt")
+  try {
+    copyFileSync(cookiesFile, tempCookiesFile)
+    // Make it writable
+    chmodSync(tempCookiesFile, 0o644)
+    return tempCookiesFile
+  } catch (error) {
+    console.warn(`Failed to copy cookies file to temp location: ${error}`)
+    // Fallback to original file (might fail on write, but at least we can read)
+    return cookiesFile
+  }
+}
+
 function sanitizeFilename(filename: string): string {
   return filename.replace(/[^a-zA-Z0-9-_]/g, "_").substring(0, 100)
 }
 
-function addCookieArgs(args: string[]): void {
+function addCookieArgs(args: string[], hasCookies: { value: boolean }): void {
   // Priority: cookies file > browser cookies
-  const cookiesFile = process.env.YT_DLP_COOKIES_FILE
-  if (cookiesFile && existsSync(cookiesFile)) {
-    args.push("--cookies", cookiesFile)
+  const writableCookiesFile = getWritableCookiesFile()
+  if (writableCookiesFile) {
+    args.push("--cookies", writableCookiesFile)
+    hasCookies.value = true
     return
   }
 
@@ -29,6 +58,7 @@ function addCookieArgs(args: string[]): void {
     const supportedBrowsers = ["chrome", "firefox", "edge", "opera", "safari", "brave"]
     if (supportedBrowsers.includes(cookiesBrowser.toLowerCase())) {
       args.push("--cookies-from-browser", cookiesBrowser.toLowerCase())
+      hasCookies.value = true
     }
   }
 }
@@ -43,10 +73,16 @@ function buildYtDlpArgs(request: DownloadRequest, outputPath: string): string[] 
   ]
 
   // Add cookie support for bypassing bot detection
-  addCookieArgs(args)
+  const hasCookies = { value: false }
+  addCookieArgs(args, hasCookies)
 
   // Use multiple player clients as fallback
-  args.push("--extractor-args", "youtube:player_client=web,ios,android")
+  // Only use web client when cookies are present (ios/android don't support cookies)
+  if (hasCookies.value) {
+    args.push("--extractor-args", "youtube:player_client=web")
+  } else {
+    args.push("--extractor-args", "youtube:player_client=web,ios,android")
+  }
 
   if (request.format === "mp3") {
     args.push("-x", "--audio-format", "mp3", "--audio-quality", "0")
@@ -90,10 +126,16 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
     ]
 
     // Add cookie support for bypassing bot detection
-    addCookieArgs(args)
+    const hasCookies = { value: false }
+    addCookieArgs(args, hasCookies)
 
     // Use multiple player clients as fallback
-    args.push("--extractor-args", "youtube:player_client=web,ios,android")
+    // Only use web client when cookies are present (ios/android don't support cookies)
+    if (hasCookies.value) {
+      args.push("--extractor-args", "youtube:player_client=web")
+    } else {
+      args.push("--extractor-args", "youtube:player_client=web,ios,android")
+    }
     args.push(url)
     const process = spawn("yt-dlp", args)
 
@@ -110,8 +152,37 @@ export async function getVideoInfo(url: string): Promise<VideoInfo> {
 
     process.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`Failed to get video info: ${stderr}`))
-        return
+        // Filter out permission errors related to cookies (non-critical)
+        const filteredStderr = stderr
+          .split("\n")
+          .filter((line) => !line.includes("PermissionError") && !line.includes("Permission denied"))
+          .join("\n")
+        
+        // Check for specific YouTube blocking errors
+        if (filteredStderr.includes("Only images are available") || filteredStderr.includes("Requested format is not available")) {
+          const errorMsg = "YouTube is blocking access to this video. This may be due to:\n" +
+            "- Expired or invalid cookies (try updating your cookies.txt file)\n" +
+            "- Bot detection (YouTube may require fresh cookies)\n" +
+            "- Age-restricted or region-locked content\n" +
+            "- Video may be unavailable\n\n" +
+            "Original error: " + filteredStderr
+          reject(new Error(`Failed to get video info: ${errorMsg}`))
+          return
+        }
+        
+        // If there's still an error after filtering, reject
+        if (filteredStderr.trim() && !stdout.trim()) {
+          reject(new Error(`Failed to get video info: ${filteredStderr || stderr}`))
+          return
+        }
+        
+        // If we have stdout despite the error, try to parse it
+        if (stdout.trim()) {
+          // Continue to parse even if there were warnings
+        } else {
+          reject(new Error(`Failed to get video info: ${filteredStderr || stderr}`))
+          return
+        }
       }
 
       try {
@@ -159,7 +230,25 @@ export async function downloadVideo(request: DownloadRequest): Promise<{ filenam
 
     process.on("close", (code) => {
       if (code !== 0) {
-        reject(new Error(`Download failed: ${stderr}`))
+        // Filter out permission errors related to cookies (non-critical)
+        const filteredStderr = stderr
+          .split("\n")
+          .filter((line) => !line.includes("PermissionError") && !line.includes("Permission denied"))
+          .join("\n")
+        
+        // Check for specific YouTube blocking errors
+        if (filteredStderr.includes("Only images are available") || filteredStderr.includes("Requested format is not available")) {
+          const errorMsg = "YouTube is blocking access to this video. This may be due to:\n" +
+            "- Expired or invalid cookies (try updating your cookies.txt file)\n" +
+            "- Bot detection (YouTube may require fresh cookies)\n" +
+            "- Age-restricted or region-locked content\n" +
+            "- Video may be unavailable\n\n" +
+            "Original error: " + filteredStderr
+          reject(new Error(`Download failed: ${errorMsg}`))
+          return
+        }
+        
+        reject(new Error(`Download failed: ${filteredStderr || stderr}`))
         return
       }
 
